@@ -1,0 +1,2 @@
+it.pleaseopen.keycloak.extensions.pin.authenticator.PinAuthenticatorFactory
+it.pleaseopen.keycloak.extensions.pin.authenticator.PinConditionalAuthenticatorFactory

@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: keycloak-pin-postgres
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - keycloak-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+    image: keycloak-pin:26.5.3
+    container_name: keycloak-pin-server
+    command:
+      - start-dev
+      - --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak_password
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: false
+      KC_HOSTNAME_STRICT_HTTPS: false
+      KC_HTTP_ENABLED: true
+      KC_HEALTH_ENABLED: true
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      # PIN Authenticator Configuration via Keycloak's native Config.Scope
+      # Format: KC_SPI_{SPI_NAME}__{PROVIDER_ID}__{PROPERTY} (double underscore = scope separator)
+      # SPI: authenticator, Provider: pin-authenticator
+      KC_SPI_AUTHENTICATOR__PIN_AUTHENTICATOR__PIN_FORMAT: "custom"
+      KC_SPI_AUTHENTICATOR__PIN_AUTHENTICATOR__VISUAL_KEYBOARD_ENABLED: "false"
+      KC_SPI_AUTHENTICATOR__PIN_AUTHENTICATOR__VISUAL_KEYBOARD_DEBUG: "false"
+      KC_SPI_AUTHENTICATOR__PIN_AUTHENTICATOR__PIN_CUSTOM_REGEX: '[\w]{8}'
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./target/keycloak-pin-authenticator-1.0.0-SNAPSHOT.jar:/opt/keycloak/providers/keycloak-pin-authenticator.jar
+      - ./docker/realms:/opt/keycloak/data/import
+    networks:
+      - keycloak-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # Static LOA demo app — served on http://localhost:3000
+  loa-demo:
+    image: node:22-alpine
+    container_name: loa-demo-app
+    working_dir: /app
+    command: node server.js
+    volumes:
+      - ./demo-loa-app:/app
+    ports:
+      - "3000:3000"
+    networks:
+      - keycloak-network
+
+  # Mailpit — SMTP capture for email testing (UI on http://localhost:8025)
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: keycloak-pin-mailpit
+    ports:
+      - "8025:8025"   # Web UI
+      - "1025:1025"   # SMTP
+    networks:
+      - keycloak-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  keycloak-network:
+    driver: bridge

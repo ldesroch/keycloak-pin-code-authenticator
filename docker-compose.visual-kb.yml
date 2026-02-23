@@ -1,0 +1,10 @@
+# Override for visual keyboard E2E tests
+# Usage: docker compose -f docker-compose.yml -f docker-compose.visual-kb.yml up -d keycloak
+services:
+  keycloak:
+    environment:
+      KC_SPI_AUTHENTICATOR__PIN_AUTHENTICATOR__PIN_FORMAT: "4-digits"
+      KC_SPI_AUTHENTICATOR__PIN_AUTHENTICATOR__VISUAL_KEYBOARD_ENABLED: "true"
+      KC_SPI_AUTHENTICATOR__PIN_AUTHENTICATOR__VISUAL_KEYBOARD_DEBUG: "true"
+      KC_SPI_AUTHENTICATOR__PIN_AUTHENTICATOR__VISUAL_KEYBOARD_OBFUSCATION: "false"
+      KC_SPI_AUTHENTICATOR__PIN_AUTHENTICATOR__PIN_CUSTOM_REGEX: ""

@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LOA Session Lock Demo</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; color: #333; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+        h1 { font-size: 1.5em; margin-bottom: 6px; }
+        .subtitle { color: #666; margin-bottom: 20px; font-size: 0.95em; }
+        .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 16px; }
+        .card h2 { font-size: 1.1em; margin-bottom: 10px; }
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; }
+        .badge-green  { background: #d4edda; color: #155724; }
+        .badge-orange { background: #fff3cd; color: #856404; }
+        .badge-red    { background: #f8d7da; color: #721c24; }
+        .badge-blue   { background: #d1ecf1; color: #0c5460; }
+        button {
+            padding: 10px 20px; border: none; border-radius: 6px; font-size: 0.95em;
+            cursor: pointer; font-weight: 500; transition: background 0.15s;
+        }
+        .btn-primary   { background: #4a90e2; color: #fff; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-danger    { background: #e25c5c; color: #fff; }
+        .btn-danger:hover  { background: #c94444; }
+        .btn-warning   { background: #f0ad4e; color: #fff; }
+        .btn-warning:hover { background: #d9953a; }
+        .btn-group { display: flex; gap: 10px; flex-wrap: wrap; }
+        .token-info { font-family: monospace; font-size: 0.85em; background: #f0f0f0; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+        .status-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .timer { font-family: monospace; font-size: 1.2em; font-weight: 700; }
+        #feature-result { margin-top: 12px; padding: 12px; border-radius: 6px; display: none; }
+        .feature-ok   { background: #d4edda; border: 1px solid #c3e6cb; display: block !important; }
+        .feature-lock { background: #fff3cd; border: 1px solid #ffeeba; display: block !important; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Session Lock Demo</h1>
+        <p class="subtitle">LOA-based step-up authentication with automatic downgrade after 5 minutes</p>
+
+        <!-- Auth status -->
+        <div class="card" id="auth-card">
+            <h2>Authentication Status</h2>
+            <div class="status-bar" id="status-bar">
+                <span class="badge badge-red" id="status-badge">Not authenticated</span>
+            </div>
+            <div class="btn-group" style="margin-top: 12px;">
+                <button class="btn-primary" id="btn-login" onclick="login()">Login (LOA 1 — password)</button>
+                <button class="btn-warning" id="btn-stepup" onclick="stepUp()" style="display:none">Step-up (LOA 2 — PIN)</button>
+                <button class="btn-danger" id="btn-logout" onclick="logout()" style="display:none">Logout</button>
+            </div>
+        </div>
+
+        <!-- Protected feature -->
+        <div class="card hidden" id="feature-card">
+            <h2>Protected Feature <span class="badge badge-blue">requires LOA 2</span></h2>
+            <p style="margin-bottom:10px;">This feature requires PIN authentication. If your LOA 2 has expired, clicking the button will redirect you to Keycloak to re-enter your PIN.</p>
+            <button class="btn-primary" onclick="accessFeature()">Access protected feature</button>
+            <div id="feature-result"></div>
+        </div>
+
+        <!-- LOA timer -->
+        <div class="card hidden" id="timer-card">
+            <h2>LOA 2 Timer</h2>
+            <p style="margin-bottom:8px;">Time remaining before LOA 2 expires:</p>
+            <div class="status-bar">
+                <span class="timer" id="timer-display">--:--</span>
+                <span class="badge badge-green" id="timer-badge">Active</span>
+            </div>
+        </div>
+
+        <!-- Token details -->
+        <div class="card hidden" id="token-card">
+            <h2>Token Details</h2>
+            <div class="token-info" id="token-info"></div>
+        </div>
+    </div>
+
+    <script>
+    // ── OIDC Config ──────────────────────────────────────────────────────────
+    const KC_URL     = 'http://localhost:8080';
+    const REALM      = 'pin-test';
+    const CLIENT_ID  = 'loa-demo-app';
+    const REDIRECT   = 'http://localhost:3000/callback.html';
+    const AUTH_EP    = `${KC_URL}/realms/${REALM}/protocol/openid-connect/auth`;
+    const TOKEN_EP   = `${KC_URL}/realms/${REALM}/protocol/openid-connect/token`;
+    const LOGOUT_EP  = `${KC_URL}/realms/${REALM}/protocol/openid-connect/logout`;
+    const LOA2_MAX_AGE = 300; // seconds
+
+    // ── State ────────────────────────────────────────────────────────────────
+    let accessToken  = null;
+    let refreshToken = null;
+    let idToken      = null;
+    let tokenPayload = null;
+    let loa2Expiry   = null; // epoch seconds when LOA 2 expires
+    let timerInterval = null;
+
+    // ── PKCE helpers ─────────────────────────────────────────────────────────
+    function randomBytes(n) {
+        const arr = new Uint8Array(n);
+        crypto.getRandomValues(arr);
+        return arr;
+    }
+    function base64url(buf) {
+        return btoa(String.fromCharCode(...new Uint8Array(buf)))
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    async function pkce() {
+        const verifier = base64url(randomBytes(32));
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+        const challenge = base64url(digest);
+        return { verifier, challenge };
+    }
+
+    // ── Auth flows ───────────────────────────────────────────────────────────
+    async function login() {
+        const { verifier, challenge } = await pkce();
+        sessionStorage.setItem('pkce_verifier', verifier);
+        sessionStorage.setItem('auth_action', 'login');
+        // Request LOA 1 (password only) — note: acr_values is voluntary
+        const url = `${AUTH_EP}?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT)}`
+            + `&response_type=code&scope=openid&acr_values=password`
+            + `&code_challenge=${challenge}&code_challenge_method=S256`;
+        window.location.href = url;
+    }
+
+    async function stepUp() {
+        const { verifier, challenge } = await pkce();
+        sessionStorage.setItem('pkce_verifier', verifier);
+        sessionStorage.setItem('auth_action', 'stepup');
+        // Request LOA 2 (PIN) using claims parameter with essential=true
+        const claims = JSON.stringify({
+            id_token: { acr: { essential: true, values: ['pin', '2'] } }
+        });
+        const url = `${AUTH_EP}?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT)}`
+            + `&response_type=code&scope=openid`
+            + `&claims=${encodeURIComponent(claims)}`
+            + `&code_challenge=${challenge}&code_challenge_method=S256`;
+        window.location.href = url;
+    }
+
+    async function accessFeature() {
+        const result = document.getElementById('feature-result');
+        // Check current ACR from token
+        const currentAcr = tokenPayload?.acr;
+        const currentLoa = getLoa(currentAcr);
+
+        if (currentLoa >= 2 && loa2Expiry && (Date.now() / 1000) < loa2Expiry) {
+            result.className = 'feature-ok';
+            result.innerHTML = '<strong>Access granted.</strong> Your LOA 2 is still valid. Feature content would appear here.';
+            return;
+        }
+
+        // LOA 2 expired or never achieved — redirect for step-up
+        result.className = 'feature-lock';
+        result.innerHTML = '<strong>LOA 2 expired or not present.</strong> Redirecting to Keycloak for PIN re-authentication...';
+        setTimeout(() => stepUp(), 1500);
+    }
+
+    function logout() {
+        const url = `${LOGOUT_EP}?client_id=${CLIENT_ID}&post_logout_redirect_uri=${encodeURIComponent('http://localhost:3000')}`;
+        clearState();
+        window.location.href = url;
+    }
+
+    // ── Token handling ───────────────────────────────────────────────────────
+    function decodeJwt(token) {
+        const parts = token.split('.');
+        if (parts.length !== 3) return null;
+        return JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    }
+
+    function getLoa(acr) {
+        if (acr === 'pin' || acr === '2') return 2;
+        if (acr === 'password' || acr === '1') return 1;
+        const n = parseInt(acr, 10);
+        return isNaN(n) ? 0 : n;
+    }
+
+    function processTokens(data) {
+        accessToken  = data.access_token;
+        refreshToken = data.refresh_token;
+        idToken      = data.id_token;
+        tokenPayload = decodeJwt(idToken);
+
+        const acr = tokenPayload?.acr || '0';
+        const loa = getLoa(acr);
+
+        // Store in sessionStorage for page reloads
+        sessionStorage.setItem('tokens', JSON.stringify(data));
+
+        updateUI(acr, loa);
+    }
+
+    function updateUI(acr, loa) {
+        const badge = document.getElementById('status-badge');
+        const btnLogin  = document.getElementById('btn-login');
+        const btnStepup = document.getElementById('btn-stepup');
+        const btnLogout = document.getElementById('btn-logout');
+        const featureCard = document.getElementById('feature-card');
+        const timerCard   = document.getElementById('timer-card');
+        const tokenCard   = document.getElementById('token-card');
+
+        btnLogin.style.display  = 'none';
+        btnStepup.style.display = 'inline-block';
+        btnLogout.style.display = 'inline-block';
+        featureCard.classList.remove('hidden');
+        tokenCard.classList.remove('hidden');
+
+        if (loa >= 2) {
+            badge.textContent = `LOA 2 — PIN authenticated (acr=${acr})`;
+            badge.className = 'badge badge-green';
+            // Start LOA 2 countdown
+            loa2Expiry = (Date.now() / 1000) + LOA2_MAX_AGE;
+            sessionStorage.setItem('loa2Expiry', loa2Expiry);
+            startTimer();
+            timerCard.classList.remove('hidden');
+            btnStepup.style.display = 'none';
+        } else {
+            badge.textContent = `LOA 1 — password only (acr=${acr})`;
+            badge.className = 'badge badge-orange';
+            loa2Expiry = null;
+            sessionStorage.removeItem('loa2Expiry');
+            timerCard.classList.add('hidden');
+        }
+
+        // Show token payload
+        document.getElementById('token-info').textContent = JSON.stringify(tokenPayload, null, 2);
+
+        // Clear feature result
+        const fr = document.getElementById('feature-result');
+        fr.className = '';
+        fr.style.display = 'none';
+    }
+
+    // ── Timer ────────────────────────────────────────────────────────────────
+    function startTimer() {
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(tickTimer, 1000);
+        tickTimer();
+    }
+
+    function tickTimer() {
+        if (!loa2Expiry) return;
+        const remaining = Math.max(0, Math.floor(loa2Expiry - Date.now() / 1000));
+        const m = String(Math.floor(remaining / 60)).padStart(2, '0');
+        const s = String(remaining % 60).padStart(2, '0');
+        document.getElementById('timer-display').textContent = `${m}:${s}`;
+
+        const timerBadge = document.getElementById('timer-badge');
+        if (remaining <= 0) {
+            timerBadge.textContent = 'Expired';
+            timerBadge.className = 'badge badge-red';
+            document.getElementById('status-badge').textContent = 'LOA 1 — PIN expired (session still active)';
+            document.getElementById('status-badge').className = 'badge badge-orange';
+            document.getElementById('btn-stepup').style.display = 'inline-block';
+            clearInterval(timerInterval);
+        } else if (remaining <= 60) {
+            timerBadge.textContent = 'Expiring soon';
+            timerBadge.className = 'badge badge-orange';
+        } else {
+            timerBadge.textContent = 'Active';
+            timerBadge.className = 'badge badge-green';
+        }
+    }
+
+    function clearState() {
+        accessToken = refreshToken = idToken = tokenPayload = loa2Expiry = null;
+        if (timerInterval) clearInterval(timerInterval);
+        sessionStorage.clear();
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    (function init() {
+        // Restore state from sessionStorage (e.g., after page refresh)
+        const stored = sessionStorage.getItem('tokens');
+        if (stored) {
+            const data = JSON.parse(stored);
+            accessToken  = data.access_token;
+            refreshToken = data.refresh_token;
+            idToken      = data.id_token;
+            tokenPayload = decodeJwt(idToken);
+            const acr = tokenPayload?.acr || '0';
+            const loa = getLoa(acr);
+            updateUI(acr, loa);
+
+            // Restore LOA 2 timer
+            const savedExpiry = sessionStorage.getItem('loa2Expiry');
+            if (savedExpiry) {
+                loa2Expiry = parseFloat(savedExpiry);
+                if ((Date.now() / 1000) < loa2Expiry) {
+                    document.getElementById('timer-card').classList.remove('hidden');
+                    startTimer();
+                } else {
+                    tickTimer(); // fire once to show expired state
+                }
+            }
+        }
+    })();
+    </script>
+</body>
+</html>

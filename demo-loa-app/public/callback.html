@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>OIDC Callback</title></head>
+<body>
+<p>Processing authentication...</p>
+<script>
+const KC_URL    = 'http://localhost:8080';
+const REALM     = 'pin-test';
+const CLIENT_ID = 'loa-demo-app';
+const REDIRECT  = 'http://localhost:3000/callback.html';
+const TOKEN_EP  = `${KC_URL}/realms/${REALM}/protocol/openid-connect/token`;
+
+(async function() {
+    const params = new URLSearchParams(window.location.search);
+    const code   = params.get('code');
+    const error  = params.get('error');
+
+    if (error) {
+        document.body.innerHTML = `<p>Auth error: ${error} — ${params.get('error_description') || ''}</p><a href="/">Back</a>`;
+        return;
+    }
+    if (!code) {
+        document.body.innerHTML = '<p>No authorization code received.</p><a href="/">Back</a>';
+        return;
+    }
+
+    const verifier = sessionStorage.getItem('pkce_verifier');
+    if (!verifier) {
+        document.body.innerHTML = '<p>Missing PKCE verifier. Please try again.</p><a href="/">Back</a>';
+        return;
+    }
+
+    try {
+        const resp = await fetch(TOKEN_EP, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'authorization_code',
+                client_id: CLIENT_ID,
+                code: code,
+                redirect_uri: REDIRECT,
+                code_verifier: verifier
+            })
+        });
+
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`Token exchange failed: ${resp.status} ${text}`);
+        }
+
+        const data = await resp.json();
+        // Store tokens and redirect back to main page
+        sessionStorage.setItem('tokens', JSON.stringify(data));
+        sessionStorage.removeItem('pkce_verifier');
+        window.location.href = '/';
+    } catch (e) {
+        document.body.innerHTML = `<p>Error: ${e.message}</p><a href="/">Back</a>`;
+    }
+})();
+</script>
+</body>
+</html>

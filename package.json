@@ -1,0 +1,16 @@
+{
+  "name": "pin-code-authenticator",
+  "version": "1.0.0",
+  "description": "A production-ready Keycloak extension that provides PIN code authentication as an additional authentication factor.",
+  "main": "e2e/test-pin-flow.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "puppeteer": "^24.37.2"
+  }
+}
