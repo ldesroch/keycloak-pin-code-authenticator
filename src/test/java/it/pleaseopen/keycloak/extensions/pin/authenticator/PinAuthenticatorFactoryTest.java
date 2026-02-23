@@ -76,15 +76,11 @@ class PinAuthenticatorFactoryTest {
     @DisplayName("Should provide config properties")
     void shouldProvideConfigProperties() {
         assertThat(factory.getConfigProperties()).isNotEmpty();
-        assertThat(factory.getConfigProperties()).hasSize(3);
+        assertThat(factory.getConfigProperties()).hasSize(2);
         
         // Check pin.requiredAction property
         assertThat(factory.getConfigProperties().stream()
                 .anyMatch(p -> p.getName().equals("pin.requiredAction"))).isTrue();
-        
-        // Check maxAttempts property
-        assertThat(factory.getConfigProperties().stream()
-                .anyMatch(p -> p.getName().equals("maxAttempts"))).isTrue();
         
         // Check pin.resetEnabled property
         assertThat(factory.getConfigProperties().stream()
