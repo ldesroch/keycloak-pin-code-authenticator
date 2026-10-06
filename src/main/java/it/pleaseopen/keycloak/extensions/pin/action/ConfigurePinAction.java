@@ -25,6 +25,9 @@ import org.keycloak.authentication.RequiredActionContext;
 import org.keycloak.authentication.RequiredActionProvider;
 import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.models.UserModel;
+import org.keycloak.authentication.CredentialRegistrator;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.sessions.AuthenticationSessionModel;
 
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
@@ -35,7 +38,7 @@ import java.util.Map;
  * This action is triggered when a user needs to set up their PIN for the first time
  * or when the PIN needs to be updated.
  */
-public class ConfigurePinAction implements RequiredActionProvider {
+public class ConfigurePinAction implements RequiredActionProvider, CredentialRegistrator {
     
     private static final Logger logger = Logger.getLogger(ConfigurePinAction.class);
     
@@ -49,18 +52,12 @@ public class ConfigurePinAction implements RequiredActionProvider {
     private static final String FORM_CUSTOM_REGEX = "customRegex";
     
     @Override
+    public String getCredentialType(KeycloakSession session, AuthenticationSessionModel authenticationSession) {
+        return PinCredentialConstants.CREDENTIAL_TYPE;
+    }
+
+    @Override
     public void evaluateTriggers(RequiredActionContext context) {
-        // Check if user has PIN configured
-        UserModel user = context.getUser();
-        PinCredentialProvider pinProvider = getPinProvider(context);
-        
-        if (pinProvider == null) {
-            return;
-        }
-        
-        if (!pinProvider.isConfiguredFor(context.getRealm(), user, PinCredentialConstants.CREDENTIAL_TYPE)) {
-            user.addRequiredAction(ConfigurePinActionFactory.PROVIDER_ID);
-        }
     }
     
     @Override

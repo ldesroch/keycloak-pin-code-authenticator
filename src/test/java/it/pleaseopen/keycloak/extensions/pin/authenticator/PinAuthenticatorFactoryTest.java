@@ -97,6 +97,6 @@ class PinAuthenticatorFactoryTest {
     @Test
     @DisplayName("Should have correct reference category")
     void shouldHaveCorrectReferenceCategory() {
-        assertThat(factory.getReferenceCategory()).isEqualTo("pin");
+        assertThat(factory.getReferenceCategory()).isEqualTo("pin-code");
     }
 }
