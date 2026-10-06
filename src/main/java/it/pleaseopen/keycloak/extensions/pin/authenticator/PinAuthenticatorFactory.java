@@ -55,7 +55,7 @@ public class PinAuthenticatorFactory implements AuthenticatorFactory {
     
     @Override
     public String getReferenceCategory() {
-        return "pin";
+        return "pin-code";
     }
     
     @Override
