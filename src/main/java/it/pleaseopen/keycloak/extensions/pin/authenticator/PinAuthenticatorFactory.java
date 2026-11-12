@@ -16,6 +16,7 @@
 package it.pleaseopen.keycloak.extensions.pin.authenticator;
 
 import it.pleaseopen.keycloak.extensions.pin.config.PinConfiguration;
+import it.pleaseopen.keycloak.extensions.pin.credential.PinCredentialConstants;
 import org.jboss.logging.Logger;
 import org.keycloak.Config;
 import org.keycloak.authentication.Authenticator;
@@ -93,6 +94,13 @@ public class PinAuthenticatorFactory implements AuthenticatorFactory {
                     .helpText("Allow users to request a PIN reset via email during authentication")
                     .type(ProviderConfigProperty.BOOLEAN_TYPE)
                     .defaultValue("false")
+                    .add()
+                .property()
+                    .name(PinCredentialConstants.CONFIG_MAX_ATTEMPTS)
+                    .label("Max PIN Attempts")
+                    .helpText("Number of consecutive failed PIN attempts before the PIN is locked until it is reset (0 = unlimited)")
+                    .type(ProviderConfigProperty.INTEGER_TYPE)
+                    .defaultValue(String.valueOf(PinCredentialConstants.DEFAULT_MAX_ATTEMPTS))
                     .add()
                 .build();
                 

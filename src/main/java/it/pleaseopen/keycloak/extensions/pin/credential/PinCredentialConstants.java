@@ -93,6 +93,21 @@ public class PinCredentialConstants {
     public static final Boolean DEFAULT_FORCE_PIN_REQUIRED_ACTION = false;
     
     /**
+     * User attribute holding the number of consecutive failed PIN attempts.
+     */
+    public static final String USER_ATTR_PIN_ATTEMPTS = "pin.attempts";
+    
+    /**
+     * Authenticator config key for the maximum number of failed PIN attempts.
+     */
+    public static final String CONFIG_MAX_ATTEMPTS = "maxAttempts";
+    
+    /**
+     * Default maximum number of failed PIN attempts before lockout (0 = unlimited).
+     */
+    public static final int DEFAULT_MAX_ATTEMPTS = 3;
+    
+    /**
      * Gets the regex pattern for a given PIN format.
      */
     public static String getRegexForFormat(String format) {

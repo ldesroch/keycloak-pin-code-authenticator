@@ -160,6 +160,8 @@ public class ConfigurePinAction implements RequiredActionProvider, CredentialReg
             );
             
             if (created != null) {
+                // A new PIN starts with a clean failed-attempt counter
+                context.getUser().removeAttribute(PinCredentialConstants.USER_ATTR_PIN_ATTEMPTS);
                 context.success();
             } else {
                 logger.error("Failed to create PIN credential - returned null");

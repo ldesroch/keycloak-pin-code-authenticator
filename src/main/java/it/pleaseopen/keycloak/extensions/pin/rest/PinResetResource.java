@@ -16,6 +16,7 @@
 package it.pleaseopen.keycloak.extensions.pin.rest;
 
 import it.pleaseopen.keycloak.extensions.pin.action.ConfigurePinActionFactory;
+import it.pleaseopen.keycloak.extensions.pin.credential.PinCredentialConstants;
 import it.pleaseopen.keycloak.extensions.pin.credential.PinCredentialProvider;
 import it.pleaseopen.keycloak.extensions.pin.credential.PinCredentialProviderFactory;
 import it.pleaseopen.keycloak.extensions.pin.token.ResetPinActionToken;
@@ -105,6 +106,7 @@ public class PinResetResource {
                 logger.debugf("Deleted existing PIN credential for user %s", user.getId());
             }
         }
+        user.removeAttribute(PinCredentialConstants.USER_ATTR_PIN_ATTEMPTS);
 
         // 2. Add CONFIGURE_PIN required action
         user.addRequiredAction(ConfigurePinActionFactory.PROVIDER_ID);

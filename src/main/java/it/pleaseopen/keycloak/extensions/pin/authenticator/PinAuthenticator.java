@@ -57,7 +57,8 @@ public class PinAuthenticator implements Authenticator {
     private static final String FORM_PIN = "pin";
     private static final String FORM_PIN_COORDS = "pinCoords";
     private static final String AUTH_NOTE_COORD_MAP = "pin.keyboard.coordMap";
-    private static final String ATTR_ATTEMPTS = "pin.attempts";
+    private static final String ATTR_ATTEMPTS = PinCredentialConstants.USER_ATTR_PIN_ATTEMPTS;
+    private static final String MSG_MAX_ATTEMPTS_REACHED = "pinMaxAttemptsReached";
     private static final int TOKEN_LIFESPAN_SECONDS = 12 * 60 * 60; // 12 hours
     
     @Override
@@ -79,6 +80,12 @@ public class PinAuthenticator implements Authenticator {
             return;
         }
         
+        // Refuse PIN entry once the maximum number of failed attempts is reached
+        if (isLockedOut(context, user)) {
+            context.challenge(createForm(context, MSG_MAX_ATTEMPTS_REACHED));
+            return;
+        }
+        
         // Show PIN input form
         Response challenge = createForm(context, null);
         context.challenge(challenge);
@@ -92,6 +99,18 @@ public class PinAuthenticator implements Authenticator {
         String resetPin = formData.getFirst("resetPin");
         if ("true".equals(resetPin)) {
             handlePinReset(context);
+            return;
+        }
+        
+        UserModel user = context.getUser();
+        
+        // Refuse further attempts once the maximum number of failed attempts is reached,
+        // without validating the submitted PIN
+        if (isLockedOut(context, user)) {
+            logger.debugf("PIN locked for user %s after too many failed attempts", user.getId());
+            context.getEvent().error(org.keycloak.events.Errors.INVALID_USER_CREDENTIALS);
+            Response challenge = createForm(context, MSG_MAX_ATTEMPTS_REACHED);
+            context.failureChallenge(AuthenticationFlowError.INVALID_CREDENTIALS, challenge);
             return;
         }
         
@@ -141,7 +160,6 @@ public class PinAuthenticator implements Authenticator {
         }
         
         // Validate PIN
-        UserModel user = context.getUser();
         RealmModel realm = context.getRealm();
         
         // Create a credential input for PIN validation with correct type
@@ -161,12 +179,16 @@ public class PinAuthenticator implements Authenticator {
         boolean valid = pinProvider.isValid(realm, user, input);
         
         if (valid) {
+            resetFailedAttempts(user);
             context.success();
         } else {
-            // Invalid PIN - let Keycloak handle brute force detection
-            logger.debugf("Invalid PIN attempt for user %s", user.getId());
+            // Invalid PIN - count the attempt; Keycloak brute force detection still applies
+            int attempts = getFailedAttempts(user) + 1;
+            user.setSingleAttribute(ATTR_ATTEMPTS, String.valueOf(attempts));
+            logger.debugf("Invalid PIN attempt %d for user %s", attempts, user.getId());
             context.getEvent().error(org.keycloak.events.Errors.INVALID_USER_CREDENTIALS);
-            Response challenge = createForm(context, "invalidPinMessage");
+            String error = isLockedOut(context, user) ? MSG_MAX_ATTEMPTS_REACHED : "invalidPinMessage";
+            Response challenge = createForm(context, error);
             context.failureChallenge(AuthenticationFlowError.INVALID_CREDENTIALS, challenge);
         }
     }
@@ -326,6 +348,60 @@ public class PinAuthenticator implements Authenticator {
                     configModel.getConfig().getOrDefault("pin.resetEnabled", "false"));
         }
         return false;
+    }
+    
+    /**
+     * Gets the maximum number of failed PIN attempts from the authenticator configuration.
+     * Returns {@link PinCredentialConstants#DEFAULT_MAX_ATTEMPTS} when not configured;
+     * 0 (or a negative value) means unlimited.
+     */
+    private int getMaxAttempts(AuthenticationFlowContext context) {
+        AuthenticatorConfigModel configModel = context.getAuthenticatorConfig();
+        if (configModel != null && configModel.getConfig() != null) {
+            String value = configModel.getConfig().get(PinCredentialConstants.CONFIG_MAX_ATTEMPTS);
+            if (value != null && !value.isBlank()) {
+                try {
+                    return Integer.parseInt(value.trim());
+                } catch (NumberFormatException e) {
+                    logger.warnf("Invalid %s value '%s', using default %d",
+                            PinCredentialConstants.CONFIG_MAX_ATTEMPTS, value,
+                            PinCredentialConstants.DEFAULT_MAX_ATTEMPTS);
+                }
+            }
+        }
+        return PinCredentialConstants.DEFAULT_MAX_ATTEMPTS;
+    }
+    
+    /**
+     * Gets the number of consecutive failed PIN attempts stored on the user.
+     */
+    private int getFailedAttempts(UserModel user) {
+        String value = user.getFirstAttribute(ATTR_ATTEMPTS);
+        if (value == null || value.isEmpty()) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+    
+    /**
+     * Clears the failed PIN attempt counter after a successful PIN entry.
+     */
+    private void resetFailedAttempts(UserModel user) {
+        if (user.getFirstAttribute(ATTR_ATTEMPTS) != null) {
+            user.removeAttribute(ATTR_ATTEMPTS);
+        }
+    }
+    
+    /**
+     * Checks whether the user has reached the maximum number of failed PIN attempts.
+     */
+    private boolean isLockedOut(AuthenticationFlowContext context, UserModel user) {
+        int maxAttempts = getMaxAttempts(context);
+        return maxAttempts > 0 && getFailedAttempts(user) >= maxAttempts;
     }
     
     /**
