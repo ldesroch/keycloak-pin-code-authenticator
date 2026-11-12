@@ -61,6 +61,8 @@ These are set on each PIN authenticator execution inside a flow (gear icon in th
 | `pin.requiredAction` | Require new users to configure a PIN on first login | `false` |
 | `maxAttempts` | Max PIN attempts before lockout (0 = unlimited) | `3` |
 
+Failed PIN attempts are counted per user in the `pin.attempts` user attribute. The counter is cleared after a correct PIN and whenever a new PIN is configured (Configure PIN required action, email reset link, or admin reset endpoint). Once `maxAttempts` consecutive failures are reached, the PIN is refused until it is reset. Keycloak's realm brute-force protection still applies independently.
+
 ### Global settings (environment variables)
 
 | Variable | Description | Default |

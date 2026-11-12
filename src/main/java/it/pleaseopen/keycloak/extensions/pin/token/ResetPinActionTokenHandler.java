@@ -16,6 +16,7 @@
 package it.pleaseopen.keycloak.extensions.pin.token;
 
 import it.pleaseopen.keycloak.extensions.pin.action.ConfigurePinActionFactory;
+import it.pleaseopen.keycloak.extensions.pin.credential.PinCredentialConstants;
 import it.pleaseopen.keycloak.extensions.pin.credential.PinCredentialProvider;
 import it.pleaseopen.keycloak.extensions.pin.credential.PinCredentialProviderFactory;
 import org.jboss.logging.Logger;
@@ -83,6 +84,7 @@ public class ResetPinActionTokenHandler extends AbstractActionTokenHandler<Reset
                         user.getId());
             }
         }
+        user.removeAttribute(PinCredentialConstants.USER_ATTR_PIN_ATTEMPTS);
 
         // Add CONFIGURE_PIN required action to both user and auth session
         user.addRequiredAction(ConfigurePinActionFactory.PROVIDER_ID);
