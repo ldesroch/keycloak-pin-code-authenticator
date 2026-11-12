@@ -38,6 +38,7 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserCredentialModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.services.resources.LoginActionsService;
+import org.keycloak.sessions.AuthenticationSessionModel;
 
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
@@ -192,7 +193,7 @@ public class PinAuthenticator implements Authenticator {
     @Override
     public void setRequiredActions(KeycloakSession session, RealmModel realm, UserModel user) {
         // Add required action to configure PIN if not set
-        if (!configuredFor(session, realm, user) && getForcePinRequiredActionConfig(session)) {
+        if (!configuredFor(session, realm, user) && getForcePinRequiredActionConfig(session, realm)) {
             user.addRequiredAction("CONFIGURE_PIN");
         }
     }
@@ -280,13 +281,42 @@ public class PinAuthenticator implements Authenticator {
 
     /**
      * Gets the configured PIN requirement from authenticator configuration.
+     * The "pin.requiredAction" option of the execution being set up is honored, as is
+     * the legacy "pin.requiredAction.force" realm attribute (either one enables it).
      */
-    private Boolean getForcePinRequiredActionConfig(KeycloakSession session) {
-        String realmAttr = session.getContext().getRealm().getAttribute("pin.requiredAction.force");
+    private Boolean getForcePinRequiredActionConfig(KeycloakSession session, RealmModel realm) {
+        AuthenticatorConfigModel configModel = getSetupRequiredExecutionConfig(session, realm);
+        if (configModel != null && configModel.getConfig() != null
+                && Boolean.parseBoolean(configModel.getConfig().get("pin.requiredAction"))) {
+            return true;
+        }
+        String realmAttr = realm.getAttribute("pin.requiredAction.force");
         if (realmAttr != null && !realmAttr.isEmpty()) {
             return Boolean.parseBoolean(realmAttr);
         }
         return PinCredentialConstants.DEFAULT_FORCE_PIN_REQUIRED_ACTION;
+    }
+    
+    /**
+     * Finds the authenticator config of the PIN execution that is being set up.
+     * {@link #setRequiredActions} has no flow context, but Keycloak marks the execution
+     * as SETUP_REQUIRED in the authentication session right before calling it.
+     */
+    private AuthenticatorConfigModel getSetupRequiredExecutionConfig(KeycloakSession session, RealmModel realm) {
+        AuthenticationSessionModel authSession = session.getContext().getAuthenticationSession();
+        if (authSession == null) {
+            return null;
+        }
+        return authSession.getExecutionStatus().entrySet().stream()
+                .filter(e -> e.getValue() == AuthenticationSessionModel.ExecutionStatus.SETUP_REQUIRED)
+                .map(e -> realm.getAuthenticationExecutionById(e.getKey()))
+                .filter(execution -> execution != null
+                        && PinAuthenticatorFactory.PROVIDER_ID.equals(execution.getAuthenticator())
+                        && execution.getAuthenticatorConfig() != null)
+                .map(execution -> realm.getAuthenticatorConfigById(execution.getAuthenticatorConfig()))
+                .filter(configModel -> configModel != null)
+                .findFirst()
+                .orElse(null);
     }
     
     /**
